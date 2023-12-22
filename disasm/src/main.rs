@@ -273,132 +273,83 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{fs, path::PathBuf};
 
     use super::*;
 
-    #[test]
-    fn single_register_mov() {
-        let binary = fs::read("test_resources/single_register_mov").unwrap();
-        let asm = fs::read_to_string("test_resources/single_register_mov.asm").unwrap();
+    fn do_test(file_name: &str) {
+        let binary_path = PathBuf::from("test_resources").join(file_name);
+        let binary = fs::read(binary_path).unwrap();
+
+        let asm_path = PathBuf::from("test_resources").join(format!("{file_name}.asm"));
+        let asm = fs::read_to_string(asm_path).unwrap();
         let generated_asm = disassembly(&binary).unwrap();
 
         assert_eq!(generated_asm, asm);
+    }
+
+    #[test]
+    fn single_register_mov() {
+        do_test("single_register_mov");
     }
 
     #[test]
     fn many_register_mov() {
-        let binary = fs::read("test_resources/many_register_mov").unwrap();
-        let asm = fs::read_to_string("test_resources/many_register_mov.asm").unwrap();
-        let generated_asm = disassembly(&binary).unwrap();
-
-        assert_eq!(generated_asm, asm);
+        do_test("many_register_mov");
     }
 
     #[test]
     fn source_address_calculation() {
-        let binary = fs::read("test_resources/source_address_calculation").unwrap();
-        let asm = fs::read_to_string("test_resources/source_address_calculation.asm").unwrap();
-        let generated_asm = disassembly(&binary).unwrap();
-
-        assert_eq!(generated_asm, asm);
+        do_test("source_address_calculation");
     }
 
     #[test]
     fn source_address_calculation_plus_8_bit_displacement() {
-        let binary =
-            fs::read("test_resources/source_address_calculation_plus_8_bit_displacement").unwrap();
-        let asm = fs::read_to_string(
-            "test_resources/source_address_calculation_plus_8_bit_displacement.asm",
-        )
-        .unwrap();
-        let generated_asm = disassembly(&binary).unwrap();
-
-        assert_eq!(generated_asm, asm);
+        do_test("source_address_calculation_plus_8_bit_displacement");
     }
 
     #[test]
     fn source_address_calculation_plus_16_bit_displacement() {
-        let binary =
-            fs::read("test_resources/source_address_calculation_plus_16_bit_displacement").unwrap();
-        let asm = fs::read_to_string(
-            "test_resources/source_address_calculation_plus_16_bit_displacement.asm",
-        )
-        .unwrap();
-        let generated_asm = disassembly(&binary).unwrap();
-
-        assert_eq!(generated_asm, asm);
+        do_test("source_address_calculation_plus_16_bit_displacement");
     }
 
     #[test]
     fn dest_address_calculation() {
-        let binary = fs::read("test_resources/dest_address_calculation").unwrap();
-        let asm = fs::read_to_string("test_resources/dest_address_calculation.asm").unwrap();
-        let generated_asm = disassembly(&binary).unwrap();
-
-        assert_eq!(generated_asm, asm);
+        do_test("dest_address_calculation");
     }
 
     #[test]
     fn immediate_to_register_8_bit() {
-        let binary = fs::read("test_resources/immediate_to_register_8_bit").unwrap();
-        let asm = fs::read_to_string("test_resources/immediate_to_register_8_bit.asm").unwrap();
-        let generated_asm = disassembly(&binary).unwrap();
-
-        assert_eq!(generated_asm, asm);
+        do_test("immediate_to_register_8_bit");
     }
 
     #[test]
     fn immediate_to_register_16_bit() {
-        let binary = fs::read("test_resources/immediate_to_register_16_bit").unwrap();
-        let asm = fs::read_to_string("test_resources/immediate_to_register_16_bit.asm").unwrap();
-        let generated_asm = disassembly(&binary).unwrap();
-
-        assert_eq!(generated_asm, asm);
+        do_test("immediate_to_register_16_bit");
     }
 
     #[test]
     fn signed_displacements() {
-        let binary = fs::read("test_resources/signed_displacements").unwrap();
-        let asm = fs::read_to_string("test_resources/signed_displacements.asm").unwrap();
-        let generated_asm = disassembly(&binary).unwrap();
-
-        assert_eq!(generated_asm, asm);
+        do_test("signed_displacements");
     }
 
     #[test]
     fn direct_address() {
-        let binary = fs::read("test_resources/direct_address").unwrap();
-        let asm = fs::read_to_string("test_resources/direct_address.asm").unwrap();
-        let generated_asm = disassembly(&binary).unwrap();
-
-        assert_eq!(generated_asm, asm);
+        do_test("direct_address");
     }
 
     #[test]
     fn memory_to_accumulator() {
-        let binary = fs::read("test_resources/memory_to_accumulator").unwrap();
-        let asm = fs::read_to_string("test_resources/memory_to_accumulator.asm").unwrap();
-        let generated_asm = disassembly(&binary).unwrap();
-
-        assert_eq!(generated_asm, asm);
+        do_test("memory_to_accumulator");
     }
 
     #[test]
     fn accumulator_to_memory() {
-        let binary = fs::read("test_resources/accumulator_to_memory").unwrap();
-        let asm = fs::read_to_string("test_resources/accumulator_to_memory.asm").unwrap();
-        let generated_asm = disassembly(&binary).unwrap();
-
-        assert_eq!(generated_asm, asm);
+        do_test("accumulator_to_memory");
     }
 
     #[test]
     fn explicit_sizes() {
-        let binary = fs::read("test_resources/explicit_sizes").unwrap();
-        let asm = fs::read_to_string("test_resources/explicit_sizes.asm").unwrap();
-        let generated_asm = disassembly(&binary).unwrap();
-
-        assert_eq!(generated_asm, asm);
+        do_test("explicit_sizes");
     }
 }
