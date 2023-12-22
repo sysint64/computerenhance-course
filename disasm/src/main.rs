@@ -24,8 +24,6 @@ impl<'a> BytesReader<'a> {
     }
 }
 
-const MOV_MASK: u8 = 0b10001000;
-
 pub fn decode_register(data: u8, w: u8) -> &'static str {
     match data {
         0b000 if w == 0b0 => "al",
@@ -48,6 +46,24 @@ pub fn decode_register(data: u8, w: u8) -> &'static str {
     }
 }
 
+pub fn effective_address_calculation(rm: u8) -> &'static str {
+    match rm {
+        0b000 => "bx + si",
+        0b001 => "bx + di",
+        0b010 => "bp + si",
+        0b011 => "bp + di",
+        0b100 => "si",
+        0b101 => "di",
+        0b110 => "bp",
+        0b111 => "bx",
+        _ => panic!("Unknown rm: {:#010b}", rm),
+    }
+}
+
+pub fn emit_mov(dst: &str, src: &str) -> String {
+    format!("mov {}, {}", dst, src)
+}
+
 pub fn disassembly(input: &[u8]) -> Result<String, &'static str> {
     let mut bytes_reader = BytesReader::new(input);
     let mut res = String::new();
@@ -55,35 +71,200 @@ pub fn disassembly(input: &[u8]) -> Result<String, &'static str> {
     res.push_str("bits 16\n\n");
 
     while !bytes_reader.has_reached_end() {
-        let inst_part_1 = bytes_reader.read_byte();
+        let op = bytes_reader.read_byte();
 
-        if inst_part_1 & MOV_MASK == MOV_MASK {
-            let inst_part_2 = bytes_reader.read_byte();
-
-            let d = (inst_part_1 & 0b00000010) >> 1;
-            let w = inst_part_1 & 0b00000001;
-
-            if d != 0b00000000 {
-                panic!("Failed to disasseble");
-            }
-
-            let mod_part = (inst_part_2 & 0b11000000) >> 6;
-
-            if mod_part != 0b11 {
-                panic!("Unsupported MOV mod value");
-            }
-
-            let reg = (inst_part_2 & 0b00111000) >> 3;
-            let rm = inst_part_2 & 0b00000111;
-
-            res.push_str("mov ");
-            res.push_str(&format!("{}, ", decode_register(rm, w)));
-            res.push_str(decode_register(reg, w));
-            res.push('\n');
+        if op & 0b10110000 == 0b10110000 {
+            dis_mov_immediate_to_register(&mut bytes_reader, &mut res, op);
+        } else if op & 0b10001000 == 0b10001000 {
+            dis_mov(&mut bytes_reader, &mut res, op);
+        } else if op & 0b10100010 == 0b10100010 {
+            dis_mov_accumulator_to_memory(&mut bytes_reader, &mut res);
+        } else if op & 0b10100000 == 0b10100000 {
+            dis_mov_memory_to_accumulator(&mut bytes_reader, &mut res);
+        } else if op & 0b11000110 == 0b11000110 {
+            dis_mov_immediate_to_register_or_memory(&mut bytes_reader, &mut res, op);
+        } else {
+            panic!("Unsupported op: {:#010b}, generated: {res}", op);
         }
     }
 
     Ok(res)
+}
+
+pub fn dis_mov(bytes_reader: &mut BytesReader, output: &mut String, op: u8) {
+    let inst_part_2 = bytes_reader.read_byte();
+
+    let d = (op & 0b00000010) >> 1;
+    let w = op & 0b00000001;
+
+    let mod_part = (inst_part_2 & 0b11000000) >> 6;
+
+    let reg = (inst_part_2 & 0b00111000) >> 3;
+    let rm = inst_part_2 & 0b00000111;
+
+    let effective_address = dis_effective_address(bytes_reader, rm, mod_part, w);
+    let register = decode_register(reg, w);
+
+    let mov = if d == 0b1 {
+        emit_mov(register, &effective_address)
+    } else {
+        emit_mov(&effective_address, register)
+    };
+
+    output.push_str(&mov);
+    output.push('\n');
+}
+
+pub fn dis_mov_immediate_to_register(bytes_reader: &mut BytesReader, output: &mut String, op: u8) {
+    let w = (op & 0b00001000) >> 3;
+    let reg = op & 0b00000111;
+
+    let register = decode_register(reg, w);
+
+    let data = if w == 0b1 {
+        let data_low = bytes_reader.read_byte();
+        let data_high = bytes_reader.read_byte();
+        let bytes: [u8; 2] = [data_low, data_high];
+
+        u16::from_le_bytes(bytes).to_string()
+    } else {
+        bytes_reader.read_byte().to_string()
+    };
+
+    let mov = emit_mov(register, &data);
+    output.push_str(&mov);
+
+    output.push('\n');
+}
+
+pub fn dis_mov_memory_to_accumulator(bytes_reader: &mut BytesReader, output: &mut String) {
+    let data_low = bytes_reader.read_byte();
+    let data_high = bytes_reader.read_byte();
+    let bytes: [u8; 2] = [data_low, data_high];
+    let address = u16::from_le_bytes(bytes).to_string();
+
+    let mov = emit_mov("ax", &format!("[{address}]"));
+    output.push_str(&mov);
+
+    output.push('\n');
+}
+
+pub fn dis_mov_accumulator_to_memory(bytes_reader: &mut BytesReader, output: &mut String) {
+    let data_low = bytes_reader.read_byte();
+    let data_high = bytes_reader.read_byte();
+    let bytes: [u8; 2] = [data_low, data_high];
+    let address = u16::from_le_bytes(bytes).to_string();
+
+    let mov = emit_mov(&format!("[{address}]"), "ax");
+    output.push_str(&mov);
+
+    output.push('\n');
+}
+
+pub fn dis_mov_immediate_to_register_or_memory(
+    bytes_reader: &mut BytesReader,
+    output: &mut String,
+    op: u8,
+) {
+    let inst_part_2 = bytes_reader.read_byte();
+
+    let w = op & 0b00000001;
+
+    let mod_part = (inst_part_2 & 0b11000000) >> 6;
+    let rm = inst_part_2 & 0b00000111;
+
+    let effective_address = dis_effective_address(bytes_reader, rm, mod_part, 0b0);
+
+    let value = if w == 0b1 {
+        let data_low = bytes_reader.read_byte();
+        let data_high = bytes_reader.read_byte();
+
+        let bytes: [u8; 2] = [data_low, data_high];
+        let data = u16::from_le_bytes(bytes);
+
+        format!("word {data}")
+    } else {
+        let data = bytes_reader.read_byte();
+
+        format!("byte {data}")
+    };
+
+    let mov = emit_mov(&effective_address, &value);
+    output.push_str(&mov);
+    output.push('\n');
+}
+
+pub fn dis_effective_address(
+    bytes_reader: &mut BytesReader,
+    rm: u8,
+    mod_part: u8,
+    w: u8,
+) -> String {
+    match mod_part {
+        0b11 => String::from(decode_register(rm, w)),
+        0b00 => {
+            if rm == 0b110 {
+                // Direct address
+                let data_low = bytes_reader.read_byte();
+                let data_high = bytes_reader.read_byte();
+
+                let bytes: [u8; 2] = [data_low, data_high];
+                let address = u16::from_le_bytes(bytes);
+
+                format!("[{address}]")
+            } else {
+                format!("[{}]", effective_address_calculation(rm))
+            }
+        }
+        0b01 => {
+            let data = bytes_reader.read_byte() as i8;
+            let mut effective_address = String::new();
+
+            effective_address.push('[');
+            effective_address.push_str(effective_address_calculation(rm));
+
+            if data != 0 {
+                if data > 0 {
+                    effective_address.push_str(" + ");
+                    effective_address.push_str(&data.to_string());
+                } else {
+                    effective_address.push_str(" - ");
+                    effective_address.push_str(&(-data).to_string());
+                }
+            }
+
+            effective_address.push(']');
+
+            effective_address
+        }
+        0b10 => {
+            let data_low = bytes_reader.read_byte();
+            let data_high = bytes_reader.read_byte();
+
+            let bytes: [u8; 2] = [data_low, data_high];
+            let data = i16::from_le_bytes(bytes);
+
+            let mut effective_address = String::new();
+
+            effective_address.push('[');
+            effective_address.push_str(effective_address_calculation(rm));
+
+            if data != 0 {
+                if data > 0 {
+                    effective_address.push_str(" + ");
+                    effective_address.push_str(&data.to_string());
+                } else {
+                    effective_address.push_str(" - ");
+                    effective_address.push_str(&(-data).to_string());
+                }
+            }
+
+            effective_address.push(']');
+
+            effective_address
+        }
+        _ => panic!("Unsupported mod: {:#010b}", mod_part),
+    }
 }
 
 fn main() {
@@ -98,9 +279,8 @@ mod tests {
 
     #[test]
     fn single_register_mov() {
-        let binary = fs::read("test_resources/listing_0037_single_register_mov").unwrap();
-        let asm =
-            fs::read_to_string("test_resources/listing_0037_single_register_mov.asm").unwrap();
+        let binary = fs::read("test_resources/single_register_mov").unwrap();
+        let asm = fs::read_to_string("test_resources/single_register_mov.asm").unwrap();
         let generated_asm = disassembly(&binary).unwrap();
 
         assert_eq!(generated_asm, asm);
@@ -108,9 +288,115 @@ mod tests {
 
     #[test]
     fn many_register_mov() {
-        let binary = fs::read("test_resources/listing_0038_many_register_mov").unwrap();
-        let asm =
-            fs::read_to_string("test_resources/listing_0038_many_register_mov.asm").unwrap();
+        let binary = fs::read("test_resources/many_register_mov").unwrap();
+        let asm = fs::read_to_string("test_resources/many_register_mov.asm").unwrap();
+        let generated_asm = disassembly(&binary).unwrap();
+
+        assert_eq!(generated_asm, asm);
+    }
+
+    #[test]
+    fn source_address_calculation() {
+        let binary = fs::read("test_resources/source_address_calculation").unwrap();
+        let asm = fs::read_to_string("test_resources/source_address_calculation.asm").unwrap();
+        let generated_asm = disassembly(&binary).unwrap();
+
+        assert_eq!(generated_asm, asm);
+    }
+
+    #[test]
+    fn source_address_calculation_plus_8_bit_displacement() {
+        let binary =
+            fs::read("test_resources/source_address_calculation_plus_8_bit_displacement").unwrap();
+        let asm = fs::read_to_string(
+            "test_resources/source_address_calculation_plus_8_bit_displacement.asm",
+        )
+        .unwrap();
+        let generated_asm = disassembly(&binary).unwrap();
+
+        assert_eq!(generated_asm, asm);
+    }
+
+    #[test]
+    fn source_address_calculation_plus_16_bit_displacement() {
+        let binary =
+            fs::read("test_resources/source_address_calculation_plus_16_bit_displacement").unwrap();
+        let asm = fs::read_to_string(
+            "test_resources/source_address_calculation_plus_16_bit_displacement.asm",
+        )
+        .unwrap();
+        let generated_asm = disassembly(&binary).unwrap();
+
+        assert_eq!(generated_asm, asm);
+    }
+
+    #[test]
+    fn dest_address_calculation() {
+        let binary = fs::read("test_resources/dest_address_calculation").unwrap();
+        let asm = fs::read_to_string("test_resources/dest_address_calculation.asm").unwrap();
+        let generated_asm = disassembly(&binary).unwrap();
+
+        assert_eq!(generated_asm, asm);
+    }
+
+    #[test]
+    fn immediate_to_register_8_bit() {
+        let binary = fs::read("test_resources/immediate_to_register_8_bit").unwrap();
+        let asm = fs::read_to_string("test_resources/immediate_to_register_8_bit.asm").unwrap();
+        let generated_asm = disassembly(&binary).unwrap();
+
+        assert_eq!(generated_asm, asm);
+    }
+
+    #[test]
+    fn immediate_to_register_16_bit() {
+        let binary = fs::read("test_resources/immediate_to_register_16_bit").unwrap();
+        let asm = fs::read_to_string("test_resources/immediate_to_register_16_bit.asm").unwrap();
+        let generated_asm = disassembly(&binary).unwrap();
+
+        assert_eq!(generated_asm, asm);
+    }
+
+    #[test]
+    fn signed_displacements() {
+        let binary = fs::read("test_resources/signed_displacements").unwrap();
+        let asm = fs::read_to_string("test_resources/signed_displacements.asm").unwrap();
+        let generated_asm = disassembly(&binary).unwrap();
+
+        assert_eq!(generated_asm, asm);
+    }
+
+    #[test]
+    fn direct_address() {
+        let binary = fs::read("test_resources/direct_address").unwrap();
+        let asm = fs::read_to_string("test_resources/direct_address.asm").unwrap();
+        let generated_asm = disassembly(&binary).unwrap();
+
+        assert_eq!(generated_asm, asm);
+    }
+
+    #[test]
+    fn memory_to_accumulator() {
+        let binary = fs::read("test_resources/memory_to_accumulator").unwrap();
+        let asm = fs::read_to_string("test_resources/memory_to_accumulator.asm").unwrap();
+        let generated_asm = disassembly(&binary).unwrap();
+
+        assert_eq!(generated_asm, asm);
+    }
+
+    #[test]
+    fn accumulator_to_memory() {
+        let binary = fs::read("test_resources/accumulator_to_memory").unwrap();
+        let asm = fs::read_to_string("test_resources/accumulator_to_memory.asm").unwrap();
+        let generated_asm = disassembly(&binary).unwrap();
+
+        assert_eq!(generated_asm, asm);
+    }
+
+    #[test]
+    fn explicit_sizes() {
+        let binary = fs::read("test_resources/explicit_sizes").unwrap();
+        let asm = fs::read_to_string("test_resources/explicit_sizes.asm").unwrap();
         let generated_asm = disassembly(&binary).unwrap();
 
         assert_eq!(generated_asm, asm);
